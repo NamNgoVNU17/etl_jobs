@@ -1,0 +1,17 @@
+# Airflow logs & database
+airflow.db
+logs/
+*.log
+*.pid
+__pycache__/
+venv/
+.env
+
+# Ignore SQLite database (nếu dùng)
+airflow.cfg
+unittest.cfg
+
+# Ignore CSV hoặc dữ liệu ETL
+data/
+*.csv
+*.json
