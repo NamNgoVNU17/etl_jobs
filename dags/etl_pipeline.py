@@ -1,17 +1,11 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from datetime import datetime, timedelta
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 import pandas as pd
 import re
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-# Kết nối PostgreSQL
-POSTGRES_CONN = "postgresql+psycopg2://postgres:password@localhost:5432/my_db"
+from datetime import datetime
 
-# Đường dẫn file CSV
-CSV_PATH = "/home/namngo/airflow/data/data.csv"
 
-# Hàm chuẩn hóa lương
 def normal_salary(s):
     s = str(s).lower()
     donvi = "USD" if "usd" in s else "VND" if "triệu" in s else None
@@ -38,12 +32,12 @@ def normal_salary(s):
 
     return None, None, donvi
 
-# Hàm chuẩn hóa địa chỉ
+
 def process_address(s):
     parts = str(s).split(": ")
-    return (parts[0], parts[1]) if len(parts) >= 2 else (parts[0], None)
+    return parts[0], parts[1] if len(parts) > 1 else None
 
-# Chuẩn hóa job title
+
 def nor_job_title(title):
     title = str(title).lower().strip()
     mapping = {
@@ -60,73 +54,36 @@ def nor_job_title(title):
             return norm_title
     return title.strip()
 
-# Task 1: Extract - Đọc dữ liệu từ CSV
-def extract_data():
-    df = pd.read_csv(CSV_PATH, encoding="utf-8")
-    df.to_csv("/home/namngo/airflow/data/raw_data.csv", index=False)  # Lưu tạm thời
-    print("Dữ liệu đã được trích xuất!")
 
-# Task 2: Transform - Xử lý dữ liệu
-def transform_data():
-    df = pd.read_csv("/home/namngo/airflow/data/raw_data.csv")
-
-    df[['min_salary', 'max_salary', 'salary_unit']] = list(map(normal_salary, df['salary']))
-    df[['city', 'district']] = list(map(process_address, df['address']))
-    df['normalized_job_title'] = df['job_title'].map(nor_job_title)
-    df['processed_at'] = datetime.now()
-
-    df.to_csv("/home/namngo/airflow/data/transformed_data.csv", index=False)
-    print("Dữ liệu đã được chuẩn hóa!")
-
-# Task 3: Load - Lưu dữ liệu vào PostgreSQL
-from sqlalchemy import create_engine
+def extract_transform():
+    df = pd.read_csv("/home/namngo/airflow/data/data.csv")
+    df[['min_salary', 'max_salary', 'salary_unit']] = df['salary'].apply(lambda x: pd.Series(normal_salary(x)))
+    df[['city', 'district']] = df['address'].apply(lambda x: pd.Series(process_address(x)))
+    df['normalized_job_title'] = df['job_title'].apply(nor_job_title)
+    df.to_csv("/home/namngo/airflow/data/cleaned_data.csv", index=False)
 
 
-def load_data():
-    engine = create_engine(POSTGRES_CONN)
-
-    try:
-        df = pd.read_csv("/home/namngo/airflow/data/transformed_data.csv")
-
-        # Sử dụng pandas method
+def load_to_postgres():
+    df = pd.read_csv("/home/namngo/airflow/data/cleaned_data.csv")
+    pg_hook = PostgresHook(postgres_conn_id='postgres_default')
+    engine = pg_hook.get_sqlalchemy_engine()
+    print("Engine:", engine)
+    with engine.connect() as connection:
         df.to_sql("job_data", engine, if_exists="replace", index=False)
 
-        print("Dữ liệu đã được tải vào PostgreSQL!")
-
-    except Exception as e:
-        print(f"Lỗi khi tải dữ liệu: {e}")
-        raise
-# Định nghĩa DAG
-default_args = {
-    "owner": "airflow",
-    "depends_on_past": False,
-    "start_date": datetime(2025, 3, 1),
-    "retries": 1,
-    "retry_delay": timedelta(minutes=5),
-}
 
 with DAG(
-    "etl_pipeline",
-    default_args=default_args,
-    schedule_interval="@daily",
-    catchup=False,
+        dag_id="etl_pandas_postgres",
+        schedule_interval="@daily",
+        start_date=datetime(2024, 3, 1),
+        catchup=False,
 ) as dag:
-
-    task_extract = PythonOperator(
-        task_id="extract_data",
-        python_callable=extract_data
+    extract_transform_task = PythonOperator(
+        task_id="extract_transform",
+        python_callable=extract_transform
     )
-
-    task_transform = PythonOperator(
-        task_id="transform_data",
-        python_callable=transform_data
+    load_task = PythonOperator(
+        task_id="load_to_postgres",
+        python_callable=load_to_postgres
     )
-
-    task_load = PythonOperator(
-        task_id="load_data",
-        python_callable=load_data
-    )
-
-    # Thiết lập thứ tự chạy các task
-    task_extract >> task_transform >> task_load
-
+    extract_transform_task >> load_task

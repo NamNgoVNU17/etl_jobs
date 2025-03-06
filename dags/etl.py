@@ -10,6 +10,13 @@ def normal_salary(s):
     if "thỏa thuận" in s:
         return None, None, donvi
 
+    temp = re.search(r"([\d,]+)\s*(?:triệu|usd)?\s*-\s*([\d,]+)\s*(?:triệu|usd)?", s)
+
+    if temp:
+        min_salary = int(temp.group(1).replace(",",""))
+        max_salary = int(temp.group(2).replace(",",""))
+        return min_salary, max_salary, donvi
+
     temp = re.search(r"trên\s*([\d,]+)", s)
     if temp:
         min_salary = int(temp.group(1).replace(",",""))
@@ -19,12 +26,6 @@ def normal_salary(s):
     if temp:
         max_salary = int(temp.group(1).replace(",",""))
         return None, max_salary, donvi
-
-    temp = re.search(r"([\d,]+)\s*-\s*([\d,]+)", s)
-    if temp:
-        min_salary = int(temp.group(1).replace(",",""))
-        max_salary = int(temp.group(2).replace(",",""))
-        return min_salary, max_salary, donvi
 
     temp = re.search(r"([\d,]+)", s)
     if temp:
@@ -60,29 +61,29 @@ def nor_job_title(title):
     return title.strip()
 
 def etl_process(csv_path):
-    # Đọc dữ liệu từ CSV
+
     df = pd.read_csv(csv_path)
 
-    # Xử lý lương
+
     df[['min_salary', 'max_salary', 'salary_unit']] = df['salary'].apply(lambda x: pd.Series(normal_salary(x)))
 
-    # Xử lý địa chỉ
+
     df[['city', 'district']] = df['address'].apply(lambda x: pd.Series(process_address(x)))
 
-    # Chuẩn hóa job title
+
     df['normalized_job_title'] = df['job_title'].apply(nor_job_title)
 
-    # Thêm cột timestamp
+
     df['processed_at'] = datetime.now()
 
     return df
 
 def load_to_postgres(df, table_name, connection_string):
-    # Tạo engine kết nối
+
     engine = create_engine(connection_string)
 
     try:
-        # Tải dữ liệu vào PostgreSQL
+
         with engine.connect() as connection:
             df.to_sql(
                 table_name,
@@ -95,19 +96,18 @@ def load_to_postgres(df, table_name, connection_string):
         print(f"Lỗi khi tải dữ liệu: {e}")
 
 def main():
-    # Đường dẫn file CSV
-    csv_path = '/home/namngo/project/prjUnigap1/data/data.csv'
 
-    # Chuỗi kết nối PostgreSQL
+    csv_path = '/home/namngo/airflow/data/data.csv'
+
+
     connection_string = "postgresql+psycopg2://postgres:password@localhost:5432/my_db"
 
-    # Bảng đích
+
     table_name = "job_data"
 
-    # Thực hiện ETL
     processed_df = etl_process(csv_path)
 
-    # Tải dữ liệu vào PostgreSQL
+
     load_to_postgres(processed_df, table_name, connection_string)
 
 if __name__ == "__main__":
