@@ -103,7 +103,7 @@ def main():
     connection_string = "postgresql+psycopg2://postgres:password@localhost:5432/my_db"
 
 
-    table_name = "job_data"
+    table_name = "my_data"
 
     processed_df = etl_process(csv_path)
 
